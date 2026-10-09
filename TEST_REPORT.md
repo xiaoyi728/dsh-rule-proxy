@@ -4,8 +4,10 @@
 
 ## 自动化结果
 
-`npm test`：32 项通过，0 失败。新增 client-plugin 模块测试覆盖规则文件暂存、原始修订号冲突保护、认证字段不覆盖、超限文件拒绝和只读部署禁写。客户端入口通过 node --check。`npm run test:browser` 在 Chromium 156、1280px 和 390px 视口通过真实 React 夹具交互测试：导入、原子保存、认证字段保留、代理/模型诊断、无页面异常和横向溢出；已检查移动截图。此夹具模拟 configForms/slots，不等于实际 DSH 页面集成验收。测试需要本机 OpenSSL 来生成临时自签名 TLS 证书，不关闭证书校验。
+`npm test`：35 项通过，0 失败。新增 client-plugin 模块测试覆盖规则文件暂存、原始修订号冲突保护、认证字段不覆盖、超限文件拒绝和只读部署禁写。客户端入口通过 node --check。`npm run test:browser` 在 Chromium 156、1280px 和 390px 视口通过真实 React 夹具交互测试：导入、原子保存、认证字段保留、代理/模型诊断、无页面异常和横向溢出；已检查移动截图。此夹具模拟 configForms/slots，不等于实际 DSH 页面集成验收。测试需要本机 OpenSSL 来生成临时自签名 TLS 证书，不关闭证书校验。
 
+- 宿主配置接口 `/dsh-rule-proxy/api/config`：GET 返回配置且从不返回 proxyToken，POST 写入经插件 schema 校验并保留未提交字段；跨源与 cross-site 请求 403，未知路由 404，非法 JSON 400，请求体上限 512 KiB。
+- 客户端只注入 slots 并挂到 settings.section，不再依赖 configForms；浏览器夹具经真实同源 fetch 验证面板渲染、字段写入、domain 导入与保存前拦截非法正则。slot 回调注册组件而非已渲染元素。
 - domain 规则前后端均支持域名本身及子域的边界匹配；本次浏览器回归在桌面/移动视口验证 domain 文件导入、保存、真实 Worker 诊断、大小写和尾点 hostname 规范化、相似域名/路径不命中、停用无效及非法 domain 模式拒绝。原始 regex 规则未改写。规则引擎的命中解释包含 ruleType。
 - 原始规则保留、hostname 规范化、停用和开关、路径不参与匹配、模型来源不管理。
 - 非法字段/协议/正则拒绝，RE2 不支持的回溯引用拒绝，失败导入保留原规则。

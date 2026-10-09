@@ -57,7 +57,11 @@ npm install /home/incam/Software/dsh-rule-proxy/dsh-rule-proxy-0.1.0.tgz
 
 ## 配置与持久化
 
-默认使用随包提供的 rules.json。自定义 `rules` 为数组，每项必须包含 include、type、title、pattern、active，且只支持 include/regex 或 include/domain。`domain` 类型匹配精确域名及其子域（如 `github.com` 匹配 `github.com` 和 `api.github.com`，但不匹配 `notgithub.com`），解决正则通配误匹配问题。最多 256 项，pattern 最多 512 字符。包内 client-plugin 提供工具开关、上游和搜索接口编辑、规则 JSON 编辑/文件导入、带修订号的原子保存以及不联网的草稿路由预览。安装时 profile entry id 必须为 `rule-proxy`，并加载 DSH 原生客户端设置和插件管理服务；已通过模块和独立 Chromium 夹具测试，实际 DSH 宿主呈现尚未验收。草稿预览在有时限的 Worker 中使用浏览器正则，不能代替宿主 RE2 校验或实际工具诊断。CLI 接受规则 JSON 文件，使用 RuleEngine.replace 导入时失败不会覆盖旧规则。
+默认使用随包提供的 rules.json。自定义 `rules` 为数组，每项必须包含 include、type、title、pattern、active，且只支持 include/regex 或 include/domain。`domain` 类型匹配精确域名及其子域（如 `github.com` 匹配 `github.com` 和 `api.github.com`，但不匹配 `notgithub.com`），解决正则通配误匹配问题。最多 256 项，pattern 最多 512 字符。
+
+设置入口是**设置侧栏的「工具规则代理」**，提供工具开关、上游与搜索接口编辑、规则 JSON 编辑与文件导入，以及不联网的路由诊断。保存、导入和诊断都会先校验规则，非法表达式当场拒绝，不会写进配置导致下次启动失败。诊断只在有时限的 Worker 中做预览，最终以宿主 RE2 校验和 `rule_proxy_diagnose` 为准。CLI 接受规则 JSON 文件，使用 RuleEngine.replace 导入时失败不会覆盖旧规则。
+
+设置页通过宿主同源接口 `/dsh-rule-proxy/api/config` 读写配置，只接受同源或本机回环请求；`proxyToken` 是只写字段，接口永不返回。安装只需 `slots` 客户端服务，不依赖 `@deepseek-ai/dsh-client-ui-settings`。
 
 限额默认：maxResponseBytes=5000000、maxBodyChars=100000、timeoutMs=30000、maxRedirects=5。复用标准 HTTP provider 的解码与截断契约：明确 Content-Length 超限拒绝，未知长度流式正文按限额截断并标记 truncated。
 

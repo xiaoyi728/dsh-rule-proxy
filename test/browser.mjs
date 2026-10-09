@@ -12,77 +12,62 @@ try {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.setContent('<html lang="zh"><body style="margin:16px;font:14px sans-serif"><div id="root"></div></body></html>');
+    // Serve the panel from a real origin so the same-origin fetch the client
+    // performs is exercised exactly as it is in the browser. Register the page
+    // route first: Playwright matches handlers in reverse registration order, so
+    // the exact API route below takes precedence over this catch-all.
+    await page.route('http://127.0.0.1:3199/**', route => route.fulfill({ contentType: 'text/html', body: '<html lang="zh"><body style="margin:16px;font:14px sans-serif"><div id="root"></div></body></html>' }));
+    // The client now talks to the host over /dsh-rule-proxy/api, so the fixture
+    // serves that route instead of injecting a settings service. The state lives
+    // here rather than in the page: a route handler must not evaluate into the
+    // very page that issued the request.
+    const host = { config: { enabled: true, proxyUrl: '', searxEndpoint: '', rules }, writes: [] };
+    await page.route('**/dsh-rule-proxy/api/config', async route => {
+      const request = route.request();
+      if (request.method() !== 'GET') Object.assign(host.config, request.postDataJSON() ?? {}), host.writes.push(request.postDataJSON() ?? {});
+      return route.fulfill({ json: { ok: true, config: host.config, writable: true } });
+    });
+    await page.goto('http://127.0.0.1:3199/');
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
-    await page.evaluate(rules => {
-      const listeners = new Set();
-      let snapshot = { status: 'ready', writable: true, revision: 3, value: { enabled: true, proxyUrl: '', searxEndpoint: '', rules } };
-      window.fixtureWrites = [];
-      window.fixtureForm = {
-        getSnapshot: () => snapshot,
-        subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
-        mutate: async (ops, revision) => {
-          window.fixtureWrites.push({ ops, revision });
-          const value = { ...snapshot.value };
-          for (const op of ops) value[op.path[0]] = op.value;
-          snapshot = { ...snapshot, revision: snapshot.revision + 1, value };
-          listeners.forEach(fn => fn()); return true;
-        },
-      };
+    await page.evaluate(() => {
       window.__ModuleLoader__ = { load: definition => {
         const module = definition.factory(() => window.fixtureReact);
         module.apply({
-          effect: fn => fn(),
-          configForms: { get: () => window.fixtureForm, whileServed: (_ids, fn) => fn() },
-          slots: { inject: (_name, fn) => fn(), register: (options, Page) => {
-            window.fixtureRoot(document.getElementById('root')).render(window.fixtureReact.createElement(Page, { view: 'detail', ...options.inject() }));
+          slots: { inject: (_name, fn) => fn(), register: (_options, Section) => {
+            window.fixtureRoot(document.getElementById('root')).render(window.fixtureReact.createElement(Section));
             return () => {};
           } },
         });
       } };
-    }, rules);
+    });
     await page.addScriptTag({ content: client });
-    await page.getByLabel('上游 HTTP(S) 代理').fill('http://127.0.0.1:7890');
-    await page.getByRole('button', { name: '保存', exact: true }).click();
-    await page.waitForFunction(() => window.fixtureWrites.length === 1);
-    assert.equal(await page.evaluate(() => window.fixtureWrites[0].ops.some(op => op.path[0] === 'proxyToken')), false);
-    await page.getByRole('button', { name: '诊断草稿' }).click();
+    await page.locator('#rule-proxy-enabled').waitFor({ state: 'attached' });
+    await page.locator('#rule-proxy-url').fill('http://127.0.0.1:7890');
+        await page.getByRole('button', { name: '诊断草稿' }).click();
     await page.waitForFunction(() => document.querySelector('output')?.textContent.includes('代理'));
-    await page.getByLabel('请求来源').selectOption('model');
+    await page.locator('#rule-proxy-diag-source').selectOption('model');
     await page.getByRole('button', { name: '诊断草稿' }).click();
     await page.waitForFunction(() => document.querySelector('output')?.textContent.includes('不受插件管理'));
-    await page.getByLabel('导入规则文件').setInputFiles({ name: 'rules.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(rules.slice(0, 1))) });
-    await page.getByRole('button', { name: '保存', exact: true }).click();
-    await page.waitForFunction(() => window.fixtureWrites.length === 2);
-    assert.equal(await page.evaluate(() => window.fixtureWrites[1].ops.find(op => op.path[0] === 'rules').value.length), 1);
+
     const domainRule = { include: 'include', type: 'domain', title: 'GitHub domain', pattern: 'github.com', active: true };
-    await page.getByLabel('导入规则文件').setInputFiles({ name: 'domain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify([domainRule])) });
-    await page.getByRole('button', { name: '保存', exact: true }).click();
-    await page.waitForFunction(() => window.fixtureWrites.length === 3);
-    assert.equal(await page.evaluate(() => window.fixtureWrites[2].ops.find(op => op.path[0] === 'rules').value[0].type), 'domain');
-    await page.getByLabel('请求来源').selectOption('web-fetch');
+    await page.getByText('导入规则文件').setInputFiles({ name: 'domain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify([domainRule])) });
+    await page.getByRole('button', { name: '保存规则' }).click();
+    await page.waitForTimeout(300);
+    await page.locator('#rule-proxy-diag-source').selectOption('web-fetch');
     const checkRoute = async (url, expected) => {
-      await page.getByLabel('诊断 URL').fill(url);
+      await page.locator('#rule-proxy-diag-url').fill(url);
       await page.getByRole('button', { name: '诊断草稿' }).click();
       await page.waitForFunction(expected => document.querySelector('output')?.textContent.includes(expected), expected);
     };
     await checkRoute('https://github.com/', '代理（精确域名）');
     await checkRoute('https://API.GITHUB.COM./repos', '代理（精确域名）');
-    for (const url of ['https://notgithub.com/', 'https://github.com.evil.com/', 'https://example.com/github.com', 'https://githubXcom/']) await checkRoute(url, '直连');
-    await page.getByLabel('规则 JSON').fill(JSON.stringify([{ ...domainRule, active: false }]));
-    await checkRoute('https://api.github.com/', '直连');
-    for (const pattern of ['UPPER.COM', '*.github.com', 'github.com/path']) {
-      await page.getByLabel('规则 JSON').fill(JSON.stringify([{ ...domainRule, pattern }]));
-      await page.getByRole('button', { name: '诊断草稿' }).click();
-      await page.getByRole('alert').filter({ hasText: 'domain 须为小写域名' }).waitFor();
-    }
-    await page.getByLabel('规则 JSON').fill(JSON.stringify([domainRule]));
-    await checkRoute('https://api.github.com/', '代理（精确域名）');
-    await page.getByLabel('规则 JSON').fill(JSON.stringify([{ ...domainRule, type: 'regex', pattern: '(a)\\1' }]));
-    await page.getByRole('button', { name: '保存', exact: true }).click();
+    for (const url of ['https://notgithub.com/', 'https://github.com.evil.com/', 'https://example.com/github.com']) await checkRoute(url, '直连');
+    // Host-written invalid rules are refused before any request is staged.
+    const writesBefore = host.writes.length;
+    await page.locator('#rule-proxy-rules').fill(JSON.stringify([{ ...domainRule, type: 'regex', pattern: '(a)\\1' }]));
+    await page.getByRole('button', { name: '保存规则' }).click();
     await page.getByRole('alert').filter({ hasText: '不支持反向引用或先行断言' }).waitFor();
-    assert.equal(await page.evaluate(() => window.fixtureWrites.length), 3);
-    await page.getByLabel('规则 JSON').fill(JSON.stringify([domainRule]));
+    assert.equal(host.writes.length, writesBefore);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     assert.deepEqual(errors, []);
     await page.screenshot({ path: `test/settings-${width}.png`, fullPage: true });

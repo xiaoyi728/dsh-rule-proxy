@@ -5,6 +5,7 @@ import { ToolTransport, proxyOptions } from './transport.js';
 import { RuleFetchProvider } from './provider.js';
 import { registerTools } from './tools.js';
 import { SearxSearchProvider } from './search.js';
+import { registerConfigApi } from './api.js';
 
 export const name = 'rule-proxy';
 export const inject = ['web'];
@@ -99,6 +100,18 @@ export function apply(ctx, config) {
     }),
   });
   ctx.inject(['tools'], child => registerTools(child, null, settings.get(), run));
+  ctx.inject(['webServer', 'settings'], child => {
+    const unregister = registerConfigApi(child, () => settings.get(), body => {
+      // Reuse the plugin schema so a browser write can never store a value the
+      // plugin would refuse at activation, and keep every field it omits.
+      const next = { ...settings.get(), ...body };
+      const validated = Config(next);
+      const patch = {};
+      for (const [key, ref] of Object.entries(validated)) patch[key] = ref.get();
+      return child.settings.mutate('rule-proxy', Object.entries(patch).map(([key, value]) => ({ op: 'set', path: [key], value })));
+    });
+    child.effect(() => unregister, 'rule-proxy config api');
+  });
 }
 
 export { RuleEngine } from './rules.js';

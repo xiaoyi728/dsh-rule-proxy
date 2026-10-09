@@ -1,136 +1,201 @@
 // Browser module consumed by the DSH module loader; no global network hooks.
+//
+// Configuration is read and written through the host's own endpoint rather
+// than ctx.configForms: that service ships with
+// @deepseek-ai/dsh-client-ui-settings, which a profile need not install, and
+// dsh 0.2 removed the older ctx.settingsScope. The registration id MUST be the
+// package name, because dsh-client-modules looks the factory up by row id.
 window.__ModuleLoader__.load({
   id: 'dsh-rule-proxy',
   factory(require) {
     const React = require('react');
-    const { createElement: h, useState, useEffect, useSyncExternalStore } = React;
-    const inject = ['slots', 'configForms'];
-    function Page({ view, form }) {
-      const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot());
-      const [draft, setDraft] = useState(null);
-      const [revision, setRevision] = useState(undefined);
+    const { createElement: h, useState, useEffect, useSyncExternalStore, useCallback, useRef } = React;
+    const inject = ['slots'];
+    const API_BASE = '/dsh-rule-proxy/api';
+
+    function fetchJson(path, options) {
+      return fetch(API_BASE + path, options)
+        .then(res => res.json().catch(() => ({})))
+        .catch(() => null);
+    }
+
+    // One module-level store: contributors live in different React trees and
+    // must never observe different snapshots.
+    let store = null;
+    function proxyStore() {
+      if (store !== null) return store;
+      let snapshot = { status: 'loading', value: undefined, writable: false, error: '' };
+      const listeners = new Set();
+      let inflight = null;
+      const same = (a, b) => a.status === b.status && a.writable === b.writable && a.error === b.error && JSON.stringify(a.value) === JSON.stringify(b.value);
+      const emit = next => {
+        if (same(snapshot, next)) return;
+        snapshot = next;
+        for (const listener of [...listeners]) listener();
+      };
+      const accept = data => {
+        if (data === null || data.ok !== true || data.config === undefined) {
+          emit({ status: 'unavailable', value: undefined, writable: false, error: (data && data.error) || '' });
+          return;
+        }
+        emit({ status: 'ready', value: data.config, writable: data.writable !== false, error: '' });
+      };
+      const refresh = () => {
+        if (inflight !== null) return inflight;
+        inflight = fetchJson('/config').then(data => { inflight = null; accept(data); }, () => { inflight = null; });
+        return inflight;
+      };
+      const set = patch => fetchJson('/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      }).then(data => {
+        if (data === null || data.ok !== true) {
+          const message = (data && data.error) || '配置写入失败';
+          emit({ ...snapshot, error: message });
+          throw new Error(message);
+        }
+        accept(data);
+      }, error => { emit({ ...snapshot, error: '无法连接宿主配置接口' }); throw error; });
+      store = { subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); }, getSnapshot: () => snapshot, refresh, set };
+      return store;
+    }
+
+    function useConfig(shared) {
+      const subscribe = useCallback(fn => shared.subscribe(fn), [shared]);
+      const getSnapshot = useCallback(() => shared.getSnapshot(), [shared]);
+      const snapshot = useSyncExternalStore(subscribe, getSnapshot);
+      useEffect(() => { shared.refresh(); }, [shared]);
+      return snapshot;
+    }
+
+    // Structural validation mirroring the host RE2 engine, so an invalid rule
+    // is refused here instead of failing plugin activation on the next boot.
+    function validateRules(rules) {
+      if (!Array.isArray(rules) || rules.length > 256) throw new Error('规则必须为数组且不超过 256 项');
+      rules.forEach((rule, index) => {
+        if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).length !== 5 || !['include', 'type', 'title', 'pattern', 'active'].every(key => Object.hasOwn(rule, key))) throw new Error(`规则 ${index}: 字段必须为 include、type、title、pattern、active`);
+        if (rule.include !== 'include' || !['regex', 'domain'].includes(rule.type)) throw new Error(`规则 ${index}: 只支持 include/regex 或 include/domain`);
+        if (typeof rule.active !== 'boolean' || typeof rule.title !== 'string' || rule.title.length > 256 || typeof rule.pattern !== 'string' || !rule.pattern || rule.pattern.length > 512) throw new Error(`规则 ${index}: 字段类型或长度无效`);
+        if (rule.type === 'domain' && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(rule.pattern)) throw new Error(`规则 ${index}: domain 须为小写域名，不含通配符或路径`);
+        if (rule.type === 'regex') {
+          try { new RegExp(rule.pattern, 'u'); } catch { throw new Error(`规则 ${index}: 正则表达式语法无效`); }
+          // Pre-check only: JavaScript accepts constructs RE2 rejects, so the
+          // host RE2 engine remains the authority on the final decision.
+          if (/\\[1-9]/.test(rule.pattern) || /\(\?(=|!|<=|<!)/.test(rule.pattern)) throw new Error(`规则 ${index}: 宿主使用 RE2，不支持反向引用或先行断言`);
+        }
+      });
+    }
+
+    function RulesPanel({ shared }) {
+      const snapshot = useConfig(shared);
       const [error, setError] = useState('');
       const [busy, setBusy] = useState(false);
+      const [rulesText, setRulesText] = useState(null);
       const [url, setUrl] = useState('https://github.com');
       const [source, setSource] = useState('web-fetch');
-      const [result, setResult] = useState('');
-      const workerRef = React.useRef(null);
-      const timerRef = React.useRef(null);
-      const cancelDiagnosis = () => {
+      const [route, setRoute] = useState('');
+      const workerRef = useRef(null);
+      const timerRef = useRef(null);
+
+      const cancel = () => {
         workerRef.current?.terminate();
         workerRef.current = null;
         clearTimeout(timerRef.current);
         timerRef.current = null;
       };
-      useEffect(() => cancelDiagnosis, []);
-      if (view === 'summary') return '工具规则代理';
-      if (snapshot.status !== 'ready') return h('p', { role: 'status' }, '配置不可用');
-      const value = draft ?? snapshot.value;
+      useEffect(() => cancel, []);
+
+      if (snapshot.status === 'unavailable') return h('p', { role: 'status' }, '宿主未提供配置接口，请确认插件已完整安装并已重启宿主。');
+      if (snapshot.status !== 'ready') return h('p', { role: 'status' }, '配置加载中…');
+
+      const value = snapshot.value ?? {};
       const disabled = busy || !snapshot.writable;
-      const change = (key, next) => {
-        if (!draft) setRevision(snapshot.revision);
-        setDraft({ ...value, [key]: next });
-        setError(''); setResult('');
-      };
-      // Structural rule validation mirroring the host RE2 engine: reject an
-      // invalid rule here instead of failing plugin activation at next boot.
-      function validateRules(rules) {
-        if (!Array.isArray(rules) || rules.length > 256) throw new Error('规则必须为数组且不超过 256 项');
-        rules.forEach((rule, index) => {
-          if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).length !== 5 || !['include', 'type', 'title', 'pattern', 'active'].every(key => Object.hasOwn(rule, key))) throw new Error(`规则 ${index}: 字段必须为 include、type、title、pattern、active`);
-          if (rule.include !== 'include' || !['regex', 'domain'].includes(rule.type)) throw new Error(`规则 ${index}: 只支持 include/regex 或 include/domain`);
-          if (typeof rule.active !== 'boolean' || typeof rule.title !== 'string' || rule.title.length > 256 || typeof rule.pattern !== 'string' || !rule.pattern || rule.pattern.length > 512) throw new Error(`规则 ${index}: 字段类型或长度无效`);
-          if (rule.type === 'domain' && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(rule.pattern)) throw new Error(`规则 ${index}: domain 须为小写域名，不含通配符或路径`);
-          if (rule.type === 'regex') {
-            try { new RegExp(rule.pattern, 'u'); } catch { throw new Error(`规则 ${index}: 正则表达式语法无效`); }
-            // Pre-check only: JavaScript accepts constructs RE2 rejects, so the
-            // host RE2 engine remains the authority on the final decision.
-            if (/\\[1-9]/.test(rule.pattern) || /\(\?(=|!|<=|<!)/.test(rule.pattern)) throw new Error(`规则 ${index}: 宿主使用 RE2，不支持反向引用或先行断言`);
-          }
-        });
-      }
-      async function save() {
+      const control = { width: '100%', boxSizing: 'border-box', padding: 8, color: 'inherit', background: 'transparent', border: '1px solid currentColor', borderRadius: 4 };
+      const field = (label, node, id) => h('label', { htmlFor: id, style: { display: 'grid', gap: 6 } }, label, node);
+
+      async function commit(patch) {
         setBusy(true); setError('');
-        try {
-          const rules = JSON.parse(value.rulesText ?? JSON.stringify(value.rules));
-          validateRules(rules);
-          const fields = { enabled: value.enabled, proxyUrl: value.proxyUrl, searxEndpoint: value.searxEndpoint, rules };
-          const accepted = await form.mutate(Object.entries(fields).map(([key, val]) => ({ op: 'set', path: [key], value: val })), revision);
-          if (!accepted) throw new Error('保存被拒绝，请检查规则或重新载入配置');
-          setDraft(null); setRevision(undefined);
-        } catch (e) { setError(e.message); }
+        try { await shared.set(patch); }
+        catch (e) { setError(e.message); }
         finally { setBusy(false); }
       }
-      async function importFile(event) {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (!file) return;
-        try {
-          if (file.size > 256 * 1024) throw new Error('规则文件超过 256 KiB');
-          const text = await file.text();
-          const rules = JSON.parse(text);
-          validateRules(rules);
-          change('rulesText', JSON.stringify(rules, null, 2));
-        } catch (e) { setError(e.message); }
+      async function saveRules(next) {
+        let rules;
+        try { rules = JSON.parse(next); validateRules(rules); }
+        catch (e) { setError(e.message); return; }
+        await commit({ rules });
       }
       function diagnose() {
-        cancelDiagnosis();
-        setResult(''); setError('');
-        if (source === 'model') { setResult('不受插件管理：模型保持既有网络路径'); return; }
+        cancel(); setRoute(''); setError('');
+        if (source === 'model') { setRoute('不受插件管理：模型保持原有网络路径'); return; }
         let hostname, rules;
         try {
           const target = new URL(url);
           if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error('仅接受无内嵌凭据的 HTTP(S) URL');
           hostname = target.hostname.toLowerCase().replace(/\.$/, '');
-          rules = JSON.parse(value.rulesText ?? JSON.stringify(value.rules));
+          rules = JSON.parse(rulesText ?? JSON.stringify(value.rules ?? []));
           validateRules(rules);
-          if (!value.enabled) { setResult(`${hostname}: 直连，工具代理已关闭`); return; }
+          if (value.enabled === false) { setRoute(`${hostname}: 直连，工具代理已关闭`); return; }
         } catch (e) { setError(e.message); return; }
-        // Draft previews are bounded native-regexp evaluations, never production routing.
-        const blob = new Blob(['onmessage=({data})=>{try{const i=data.rules.findIndex(r=>r.active&&(r.type==="domain"?(data.hostname===r.pattern||data.hostname.endsWith("."+r.pattern)):new RegExp(r.pattern,"u").test(data.hostname)));postMessage({index:i})}catch{postMessage({error:true})}}'], { type: 'text/javascript' });
-        const address = URL.createObjectURL(blob);
+        const workerSource = 'onmessage=({data})=>{try{const i=data.rules.findIndex(r=>r.active&&(r.type==="domain"?(data.hostname===r.pattern||data.hostname.endsWith("."+r.pattern)):new RegExp(r.pattern,"u").test(data.hostname)));postMessage({index:i})}catch{postMessage({error:true})}}';
+        const address = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
         let worker;
         try { worker = new Worker(address); }
-        catch { URL.revokeObjectURL(address); setError('浏览器禁止 Worker，使用 rule_proxy_diagnose 工具诊断'); return; }
+        catch { URL.revokeObjectURL(address); setError('浏览器禁止 Worker，改用 rule_proxy_diagnose 工具诊断'); return; }
         URL.revokeObjectURL(address);
         workerRef.current = worker;
-        timerRef.current = setTimeout(() => { cancelDiagnosis(); setError('草稿诊断超时，请检查表达式'); }, 200);
-        const finish = cancelDiagnosis;
-        worker.onerror = () => { finish(); setError('草稿诊断失败'); };
+        timerRef.current = setTimeout(() => { cancel(); setError('诊断超时，请检查表达式'); }, 200);
+        const finish = cancel;
+        worker.onerror = () => { finish(); setError('诊断失败'); };
         worker.onmessage = ({ data }) => {
           finish();
           if (data.error) { setError('表达式无效，保存时宿主会进一步校验 RE2 兼容性'); return; }
           const match = rules[data.index];
-          setResult(match ? `${hostname}: 代理（${match.type === 'domain' ? '精确域名' : '正则'}）；${match.title}；${match.pattern}${value.proxyUrl ? '' : '；未配置上游'}` : `${hostname}: 直连，未命中活动规则`);
+          setRoute(match
+            ? `${hostname}: 代理（${match.type === 'domain' ? '精确域名' : '正则'}）；${match.title}；${match.pattern}${(value.proxyUrl ?? '') === '' ? '；未配置上游' : ''}`
+            : `${hostname}: 直连，未命中活动规则`);
         };
         worker.postMessage({ rules, hostname });
       }
-      const field = (label, node) => h('label', { style: { display: 'grid', gap: 6 } }, label, node);
-      const control = { width: '100%', padding: 8, borderRadius: 4, color: 'inherit', background: 'transparent', border: '1px solid currentColor', boxSizing: 'border-box' };
-      return h('section', { style: { display: 'grid', gap: 16, maxWidth: 760, minWidth: 0 } },
-        !snapshot.writable && h('p', { role: 'status' }, '当前部署配置只读'),
-        field('工具代理', h('input', { type: 'checkbox', checked: value.enabled, disabled, onChange: e => change('enabled', e.target.checked) })),
-        field('上游 HTTP(S) 代理', h('input', { style: control, value: value.proxyUrl ?? '', disabled, onChange: e => change('proxyUrl', e.target.value) })),
-        field('SearXNG 接口', h('input', { style: control, value: value.searxEndpoint ?? '', disabled, onChange: e => change('searxEndpoint', e.target.value) })),
-        field('规则 JSON', h('textarea', { style: { ...control, fontFamily: 'monospace', minHeight: 280, resize: 'vertical' }, value: value.rulesText ?? JSON.stringify(value.rules, null, 2), disabled, onChange: e => change('rulesText', e.target.value) })),
-        field('导入规则文件', h('input', { type: 'file', accept: '.json,application/json', disabled, onChange: importFile })),
-        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
-          h('button', { type: 'button', disabled: disabled || !draft, onClick: save }, busy ? '保存中' : '保存'),
-          h('button', { type: 'button', disabled: busy || !draft, onClick: () => { setDraft(null); setRevision(undefined); setError(''); setResult(''); } }, '放弃修改')),
-        field('诊断 URL', h('input', { style: control, value: url, onChange: e => { setUrl(e.target.value); setResult(''); } })),
-        field('请求来源', h('select', { style: control, value: source, onChange: e => { setSource(e.target.value); setResult(''); } },
+
+      return h('div', { style: { display: 'grid', gap: 14, maxWidth: 760, minWidth: 0 } },
+        field('工具代理', h('input', { id: 'rule-proxy-enabled', type: 'checkbox', checked: value.enabled === true, disabled, onChange: e => commit({ enabled: e.target.checked }) })),
+        field('上游 HTTP(S) 代理', h('input', { id: 'rule-proxy-url', style: control, value: value.proxyUrl ?? '', disabled, placeholder: 'http://127.0.0.1:7890', onChange: e => commit({ proxyUrl: e.target.value }) })),
+        field('SearXNG 接口', h('input', { id: 'rule-proxy-searx', style: control, value: value.searxEndpoint ?? '', disabled, placeholder: 'https://search.example/search', onChange: e => commit({ searxEndpoint: e.target.value }) })),
+        field('规则 JSON', h('textarea', { id: 'rule-proxy-rules', style: { ...control, fontFamily: 'monospace', minHeight: 240, resize: 'vertical' }, value: rulesText ?? JSON.stringify(value.rules ?? [], null, 2), disabled, onChange: e => setRulesText(e.target.value) })),
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
+          h('button', { type: 'button', disabled: disabled || rulesText === null, onClick: () => saveRules(rulesText) }, busy ? '保存中' : '保存规则'),
+          h('label', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, '导入规则文件',
+            h('input', { type: 'file', accept: '.json,application/json', disabled, onChange: async event => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (!file) return;
+              try {
+                if (file.size > 256 * 1024) throw new Error('规则文件超过 256 KiB');
+                const text = await file.text();
+                validateRules(JSON.parse(text));
+                setRulesText(text);
+              } catch (e) { setError(e.message); }
+            } })),
+          h('button', { type: 'button', disabled: rulesText === null, onClick: () => { setRulesText(null); setError(''); } }, '放弃修改')),
+        field('诊断 URL', h('input', { id: 'rule-proxy-diag-url', style: control, value: url, onChange: e => { setUrl(e.target.value); setRoute(''); } })),
+        field('请求来源', h('select', { id: 'rule-proxy-diag-source', style: control, value: source, onChange: e => { setSource(e.target.value); setRoute(''); } },
           ...['web-fetch', 'pure-search', 'github-api', 'github-git', 'model'].map(s => h('option', { key: s, value: s }, s)))),
         h('button', { type: 'button', onClick: diagnose }, '诊断草稿'),
-        h('small', null, '草稿预览不联网；实际路由以宿主 RE2 校验和 rule_proxy_diagnose 为准。'),
-        result && h('output', { style: { overflowWrap: 'anywhere' }, 'aria-live': 'polite' }, result),
-        error && h('p', { role: 'alert', style: { overflowWrap: 'anywhere' } }, error));
+        h('small', null, '诊断不联网；实际路由以宿主 RE2 校验和 rule_proxy_diagnose 为准。'),
+        route && h('output', { style: { overflowWrap: 'anywhere' }, 'aria-live': 'polite' }, route),
+        error && h('p', { role: 'alert', style: { overflowWrap: 'anywhere' } }, error),
+        snapshot.error && h('p', { role: 'alert' }, snapshot.error));
     }
+
     function apply(ctx) {
-      const form = ctx.configForms.get('rule-proxy');
-      ctx.effect(() => ctx.configForms.whileServed(['rule-proxy'], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
-        name: 'plugins.item', id: 'rule-proxy', order: 45, label: () => '工具规则代理', inject: () => ({ form }),
-      }, Page))), 'rule-proxy settings page');
+      const shared = proxyStore();
+      ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section', id: 'dsh-rule-proxy', order: 30, label: '工具规则代理',
+      }, function Section() { return h(RulesPanel, { shared }); }));
     }
+
     return { inject, apply };
   },
 });
