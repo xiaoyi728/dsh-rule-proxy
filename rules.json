@@ -1,0 +1,86 @@
+[
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "GitHub 走代理",
+    "pattern": ".*github.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "Google 走代理",
+    "pattern": ".*google.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "GPT走代理",
+    "pattern": ".*chatgpt.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "argilla",
+    "pattern": ".*argilla.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "unsloth",
+    "pattern": ".*unsloth.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "opencode",
+    "pattern": ".*opencode.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "AIHUB",
+    "pattern": ".*aihub.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "huggingface",
+    "pattern": ".*huggingface.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "aireiter",
+    "pattern": ".*aireiter.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "oaistatic",
+    "pattern": ".*oaistatic.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "manus",
+    "pattern": ".*manus.*",
+    "active": true
+  },
+  {
+    "include": "include",
+    "type": "regex",
+    "title": "openai",
+    "pattern": ".*openai.*",
+    "active": true
+  }
+]

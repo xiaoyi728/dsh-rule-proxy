@@ -1,0 +1,7 @@
+# dsh-rule-proxy bundle for DeepSeek Harness (dsh).
+# Installed with `dsh plugin --profile <profile> add github:<owner>/dsh-rule-proxy`.
+# The insert registers the host half under the stable id `rule-proxy`, which the
+# client settings page addresses through ctx.configForms.
+- insert:
+    - id: rule-proxy
+      name: dsh-rule-proxy

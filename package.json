@@ -1,0 +1,79 @@
+{
+  "name": "dsh-rule-proxy",
+  "version": "0.1.0",
+  "description": "Isolated hostname-rule transport for DSH web tools",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./core": "./src/provider.js",
+    "./client": "./src/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "rules.json",
+    "README.md",
+    "TEST_REPORT.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "proxy",
+    "network"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaoyi728/dsh-rule-proxy.git"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/index.js && node --check src/client.js",
+    "test:browser": "node test/browser.mjs",
+    "test:package": "node test/package-smoke.mjs",
+    "diagnose": "node src/cli.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-web-fetch-http": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.4",
+    "ipaddr.js": "^2.5.0",
+    "isomorphic-git": "^1.37.3",
+    "re2-wasm": "^1.0.2",
+    "undici": "^8.10.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-web": "0.2.0-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tool-web": "0.2.0-rc.2",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.64.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
