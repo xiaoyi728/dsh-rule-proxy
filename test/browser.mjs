@@ -74,10 +74,15 @@ try {
     for (const pattern of ['UPPER.COM', '*.github.com', 'github.com/path']) {
       await page.getByLabel('规则 JSON').fill(JSON.stringify([{ ...domainRule, pattern }]));
       await page.getByRole('button', { name: '诊断草稿' }).click();
-      await page.getByRole('alert').filter({ hasText: 'domain 规则须为小写域名' }).waitFor();
+      await page.getByRole('alert').filter({ hasText: 'domain 须为小写域名' }).waitFor();
     }
     await page.getByLabel('规则 JSON').fill(JSON.stringify([domainRule]));
     await checkRoute('https://api.github.com/', '代理（精确域名）');
+    await page.getByLabel('规则 JSON').fill(JSON.stringify([{ ...domainRule, type: 'regex', pattern: '(a)\\1' }]));
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: '不支持反向引用或先行断言' }).waitFor();
+    assert.equal(await page.evaluate(() => window.fixtureWrites.length), 3);
+    await page.getByLabel('规则 JSON').fill(JSON.stringify([domainRule]));
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     assert.deepEqual(errors, []);
     await page.screenshot({ path: `test/settings-${width}.png`, fullPage: true });

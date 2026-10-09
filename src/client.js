@@ -32,10 +32,28 @@ window.__ModuleLoader__.load({
         setDraft({ ...value, [key]: next });
         setError(''); setResult('');
       };
+      // Structural rule validation mirroring the host RE2 engine: reject an
+      // invalid rule here instead of failing plugin activation at next boot.
+      function validateRules(rules) {
+        if (!Array.isArray(rules) || rules.length > 256) throw new Error('规则必须为数组且不超过 256 项');
+        rules.forEach((rule, index) => {
+          if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).length !== 5 || !['include', 'type', 'title', 'pattern', 'active'].every(key => Object.hasOwn(rule, key))) throw new Error(`规则 ${index}: 字段必须为 include、type、title、pattern、active`);
+          if (rule.include !== 'include' || !['regex', 'domain'].includes(rule.type)) throw new Error(`规则 ${index}: 只支持 include/regex 或 include/domain`);
+          if (typeof rule.active !== 'boolean' || typeof rule.title !== 'string' || rule.title.length > 256 || typeof rule.pattern !== 'string' || !rule.pattern || rule.pattern.length > 512) throw new Error(`规则 ${index}: 字段类型或长度无效`);
+          if (rule.type === 'domain' && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(rule.pattern)) throw new Error(`规则 ${index}: domain 须为小写域名，不含通配符或路径`);
+          if (rule.type === 'regex') {
+            try { new RegExp(rule.pattern, 'u'); } catch { throw new Error(`规则 ${index}: 正则表达式语法无效`); }
+            // Pre-check only: JavaScript accepts constructs RE2 rejects, so the
+            // host RE2 engine remains the authority on the final decision.
+            if (/\\[1-9]/.test(rule.pattern) || /\(\?(=|!|<=|<!)/.test(rule.pattern)) throw new Error(`规则 ${index}: 宿主使用 RE2，不支持反向引用或先行断言`);
+          }
+        });
+      }
       async function save() {
         setBusy(true); setError('');
         try {
           const rules = JSON.parse(value.rulesText ?? JSON.stringify(value.rules));
+          validateRules(rules);
           const fields = { enabled: value.enabled, proxyUrl: value.proxyUrl, searxEndpoint: value.searxEndpoint, rules };
           const accepted = await form.mutate(Object.entries(fields).map(([key, val]) => ({ op: 'set', path: [key], value: val })), revision);
           if (!accepted) throw new Error('保存被拒绝，请检查规则或重新载入配置');
@@ -51,7 +69,7 @@ window.__ModuleLoader__.load({
           if (file.size > 256 * 1024) throw new Error('规则文件超过 256 KiB');
           const text = await file.text();
           const rules = JSON.parse(text);
-          if (!Array.isArray(rules) || rules.length > 256) throw new Error('规则必须为数组且不超过 256 项');
+          validateRules(rules);
           change('rulesText', JSON.stringify(rules, null, 2));
         } catch (e) { setError(e.message); }
       }
@@ -65,11 +83,7 @@ window.__ModuleLoader__.load({
           if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error('仅接受无内嵌凭据的 HTTP(S) URL');
           hostname = target.hostname.toLowerCase().replace(/\.$/, '');
           rules = JSON.parse(value.rulesText ?? JSON.stringify(value.rules));
-          if (!Array.isArray(rules) || rules.length > 256) throw new Error('无效规则数组');
-          for (const rule of rules) {
-            if (!rule || Object.keys(rule).length !== 5 || !['include', 'type', 'title', 'pattern', 'active'].every(key => Object.hasOwn(rule, key)) || rule.include !== 'include' || !['regex', 'domain'].includes(rule.type) || typeof rule.active !== 'boolean' || typeof rule.title !== 'string' || rule.title.length > 256 || typeof rule.pattern !== 'string' || !rule.pattern || rule.pattern.length > 512) throw new Error('无效规则字段');
-            if (rule.type === 'domain' && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(rule.pattern)) throw new Error('domain 规则须为小写域名，不包含通配符或路径');
-          }
+          validateRules(rules);
           if (!value.enabled) { setResult(`${hostname}: 直连，工具代理已关闭`); return; }
         } catch (e) { setError(e.message); return; }
         // Draft previews are bounded native-regexp evaluations, never production routing.
