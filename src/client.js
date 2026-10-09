@@ -87,6 +87,13 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // Safe count for a possibly half-typed draft: never throw while editing.
+    function ruleCount(text, saved) {
+      if (text === null) return `共 ${(saved ?? []).length} 条。type 为 domain 时按域名及子域精确匹配，为 regex 时按正则匹配 hostname。`;
+      try { return `共 ${JSON.parse(text).length} 条。type 为 domain 时按域名及子域精确匹配，为 regex 时按正则匹配 hostname。`; }
+      catch { return 'JSON 尚未完成，保存前会校验。'; }
+    }
+
     function RulesPanel({ shared }) {
       const snapshot = useConfig(shared);
       const [error, setError] = useState('');
@@ -111,8 +118,14 @@ window.__ModuleLoader__.load({
 
       const value = snapshot.value ?? {};
       const disabled = busy || !snapshot.writable;
-      const control = { width: '100%', boxSizing: 'border-box', padding: 8, color: 'inherit', background: 'transparent', border: '1px solid currentColor', borderRadius: 4 };
-      const field = (label, node, id) => h('label', { htmlFor: id, style: { display: 'grid', gap: 6 } }, label, node);
+      const control = { width: '100%', boxSizing: 'border-box', padding: '7px 9px', fontSize: 13, color: 'inherit', background: 'var(--dsw-specific-input, transparent)', border: '1px solid var(--dsw-alias-border-l1, currentColor)', borderRadius: 6 };
+      const field = (label, node, hint) => h('label', { style: { display: 'grid', gap: 5, minWidth: 0 } },
+        h('span', { style: { fontSize: 13, fontWeight: 550 } }, label),
+        node,
+        hint && h('span', { style: { fontSize: 12, lineHeight: 1.6, opacity: 0.68 } }, hint));
+      const section = (title, children) => h('section', { style: { display: 'grid', gap: 10, padding: '12px 14px', border: '1px solid var(--dsw-alias-border-l1, currentColor)', borderRadius: 8 } },
+        h('h4', { style: { margin: 0, fontSize: 13, fontWeight: 650, letterSpacing: '0.02em', opacity: 0.8 } }, title),
+        ...children);
 
       async function commit(patch) {
         setBusy(true); setError('');
@@ -159,34 +172,61 @@ window.__ModuleLoader__.load({
         worker.postMessage({ rules, hostname });
       }
 
-      return h('div', { style: { display: 'grid', gap: 14, maxWidth: 760, minWidth: 0 } },
-        field('工具代理', h('input', { id: 'rule-proxy-enabled', type: 'checkbox', checked: value.enabled === true, disabled, onChange: e => commit({ enabled: e.target.checked }) })),
-        field('上游 HTTP(S) 代理', h('input', { id: 'rule-proxy-url', style: control, value: value.proxyUrl ?? '', disabled, placeholder: 'http://127.0.0.1:7890', onChange: e => commit({ proxyUrl: e.target.value }) })),
-        field('SearXNG 接口', h('input', { id: 'rule-proxy-searx', style: control, value: value.searxEndpoint ?? '', disabled, placeholder: 'https://search.example/search', onChange: e => commit({ searxEndpoint: e.target.value }) })),
-        field('规则 JSON', h('textarea', { id: 'rule-proxy-rules', style: { ...control, fontFamily: 'monospace', minHeight: 240, resize: 'vertical' }, value: rulesText ?? JSON.stringify(value.rules ?? [], null, 2), disabled, onChange: e => setRulesText(e.target.value) })),
-        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
-          h('button', { type: 'button', disabled: disabled || rulesText === null, onClick: () => saveRules(rulesText) }, busy ? '保存中' : '保存规则'),
-          h('label', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, '导入规则文件',
-            h('input', { type: 'file', accept: '.json,application/json', disabled, onChange: async event => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (!file) return;
-              try {
-                if (file.size > 256 * 1024) throw new Error('规则文件超过 256 KiB');
-                const text = await file.text();
-                validateRules(JSON.parse(text));
-                setRulesText(text);
-              } catch (e) { setError(e.message); }
-            } })),
-          h('button', { type: 'button', disabled: rulesText === null, onClick: () => { setRulesText(null); setError(''); } }, '放弃修改')),
-        field('诊断 URL', h('input', { id: 'rule-proxy-diag-url', style: control, value: url, onChange: e => { setUrl(e.target.value); setRoute(''); } })),
-        field('请求来源', h('select', { id: 'rule-proxy-diag-source', style: control, value: source, onChange: e => { setSource(e.target.value); setRoute(''); } },
-          ...['web-fetch', 'pure-search', 'github-api', 'github-git', 'model'].map(s => h('option', { key: s, value: s }, s)))),
-        h('button', { type: 'button', onClick: diagnose }, '诊断草稿'),
-        h('small', null, '诊断不联网；实际路由以宿主 RE2 校验和 rule_proxy_diagnose 为准。'),
-        route && h('output', { style: { overflowWrap: 'anywhere' }, 'aria-live': 'polite' }, route),
-        error && h('p', { role: 'alert', style: { overflowWrap: 'anywhere' } }, error),
-        snapshot.error && h('p', { role: 'alert' }, snapshot.error));
+      return h('div', { style: { display: 'grid', gap: 18, maxWidth: 720, minWidth: 0 } },
+        h('div', { style: { display: 'grid', gap: 6 } },
+          h('div', { style: { fontSize: 17, fontWeight: 650 } }, '工具规则代理'),
+          h('div', { style: { fontSize: 13, lineHeight: 1.7, opacity: 0.75 } }, '按 hostname 规则决定网页工具是否走代理。模型请求始终沿用原有网络路径，不受此设置影响。'),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 } },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '3px 10px', borderRadius: 999, border: '1px solid currentColor', opacity: 0.85 } },
+              h('span', { 'data-active': String(value.enabled === true), style: { width: 8, height: 8, borderRadius: 999, background: value.enabled === true ? 'var(--dsw-alias-state-success-primary, #10b981)' : 'var(--dsw-alias-state-error-primary, #ef4444)' } }),
+              value.enabled === true ? '已开启' : '已关闭'))),
+
+        section('代理', [
+          h('label', { htmlFor: 'rule-proxy-enabled', style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 550, cursor: disabled ? 'not-allowed' : 'pointer' } },
+            h('input', { id: 'rule-proxy-enabled', type: 'checkbox', checked: value.enabled === true, disabled, onChange: e => commit({ enabled: e.target.checked }) }),
+            h('span', null, '工具代理'),
+            h('span', { style: { fontSize: 12, fontWeight: 400, opacity: 0.68 } }, '关闭后规则仍然匹配，但网页工具改为直连。')),
+          field('上游 HTTP(S) 代理', h('input', { id: 'rule-proxy-url', style: control, value: value.proxyUrl ?? '', disabled, placeholder: 'http://10.20.15.242:10880', onChange: e => commit({ proxyUrl: e.target.value }) }),
+            '命中规则的网页工具通过此地址连接。只能填 origin，不含路径与账号密码。'),
+          field('SearXNG 接口', h('input', { id: 'rule-proxy-searx', style: control, value: value.searxEndpoint ?? '', disabled, placeholder: '留空即可不启用', onChange: e => commit({ searxEndpoint: e.target.value }) }),
+            '可选。仅用于纯搜索服务；该服务需开启 JSON 输出，且其 hostname 命中规则才会走代理。'),
+        ]),
+
+        section('规则', [
+          field('规则 JSON', h('textarea', { id: 'rule-proxy-rules', style: { ...control, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12.5, lineHeight: 1.6, minHeight: 220, resize: 'vertical' }, value: rulesText ?? JSON.stringify(value.rules ?? [], null, 2), disabled, onChange: e => setRulesText(e.target.value) }),
+            ruleCount(rulesText, value.rules)),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
+            h('button', { type: 'button', disabled: disabled || rulesText === null, onClick: () => saveRules(rulesText) }, busy ? '保存中…' : '保存规则'),
+            h('label', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 } }, '导入规则文件',
+              h('input', { type: 'file', accept: '.json,application/json', disabled, onChange: async event => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                try {
+                  if (file.size > 256 * 1024) throw new Error('规则文件超过 256 KiB');
+                  const text = await file.text();
+                  validateRules(JSON.parse(text));
+                  setRulesText(text);
+                  setError('');
+                } catch (e) { setError(e.message); }
+              } })),
+            h('button', { type: 'button', disabled: rulesText === null, onClick: () => { setRulesText(null); setError(''); } }, '放弃修改')),
+        ]),
+
+        section('路由诊断', [
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 10, alignItems: 'end' } },
+            field('目标 URL', h('input', { id: 'rule-proxy-diag-url', style: control, value: url, onChange: e => { setUrl(e.target.value); setRoute(''); } })),
+            field('请求来源', h('select', { id: 'rule-proxy-diag-source', style: control, value: source, onChange: e => { setSource(e.target.value); setRoute(''); } },
+              ...[['web-fetch', '网页读取'], ['pure-search', '纯搜索'], ['github-api', 'GitHub API'], ['github-git', 'Git 引用'], ['model', '模型请求（不受管理）']]
+                .map(([value_, text]) => h('option', { key: value_, value: value_ }, text))))),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+            h('button', { type: 'button', onClick: diagnose }, '诊断'),
+            h('small', { style: { opacity: 0.7 } }, '不联网，仅预览规则命中；实际路由以宿主校验和 rule_proxy_diagnose 工具为准。')),
+          route && h('output', { style: { display: 'block', overflowWrap: 'anywhere', padding: '8px 10px', borderRadius: 6, border: '1px solid currentColor', fontSize: 13 }, 'aria-live': 'polite' }, route),
+        ].flat()),
+
+        error && h('p', { role: 'alert', style: { overflowWrap: 'anywhere', margin: 0 } }, error),
+        snapshot.error && h('p', { role: 'alert', style: { margin: 0 } }, snapshot.error));
     }
 
     function apply(ctx) {

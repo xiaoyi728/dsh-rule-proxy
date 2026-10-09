@@ -43,20 +43,20 @@ try {
     await page.addScriptTag({ content: client });
     await page.locator('#rule-proxy-enabled').waitFor({ state: 'attached' });
     await page.locator('#rule-proxy-url').fill('http://127.0.0.1:7890');
-        await page.getByRole('button', { name: '诊断草稿' }).click();
+        await page.getByRole('button', { name: '诊断' }).click();
     await page.waitForFunction(() => document.querySelector('output')?.textContent.includes('代理'));
     await page.locator('#rule-proxy-diag-source').selectOption('model');
-    await page.getByRole('button', { name: '诊断草稿' }).click();
+    await page.getByRole('button', { name: '诊断' }).click();
     await page.waitForFunction(() => document.querySelector('output')?.textContent.includes('不受插件管理'));
 
     const domainRule = { include: 'include', type: 'domain', title: 'GitHub domain', pattern: 'github.com', active: true };
-    await page.getByText('导入规则文件').setInputFiles({ name: 'domain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify([domainRule])) });
+    await page.locator('input[type=file]').setInputFiles({ name: 'domain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify([domainRule])) });
     await page.getByRole('button', { name: '保存规则' }).click();
     await page.waitForTimeout(300);
     await page.locator('#rule-proxy-diag-source').selectOption('web-fetch');
     const checkRoute = async (url, expected) => {
       await page.locator('#rule-proxy-diag-url').fill(url);
-      await page.getByRole('button', { name: '诊断草稿' }).click();
+      await page.getByRole('button', { name: '诊断' }).click();
       await page.waitForFunction(expected => document.querySelector('output')?.textContent.includes(expected), expected);
     };
     await checkRoute('https://github.com/', '代理（精确域名）');
