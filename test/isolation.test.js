@@ -72,12 +72,14 @@ test('same-origin real tool/model requests stay isolated; global state unchanged
   assert.equal(globalThis.fetch, globalFetch);
 });
 
-test('matched proxy failure does not fall back; model still works', async t => {
+test('matched proxy failure falls back to direct so the tool still succeeds', async t => {
   const f = await fixture(t);
-  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: 'http://127.0.0.1:1', resolve: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: 'http://127.0.0.1:1', resolve: async () => [{ address: '127.0.0.1', family: 4 }] });
   t.after(() => transport.close());
-  await assert.rejects(new RuleFetchProvider(transport, { timeoutMs: 1000 }).fetch({ url: f.url }));
-  assert.equal(f.hits.model, 0);
+  // Upstream is dead: the request must succeed directly instead of erroring.
+  const tool = await new RuleFetchProvider(transport, { timeoutMs: 1000 }).fetch({ url: f.url });
+  assert.equal(tool.body.content, 'model-original-path');
+  assert.equal(f.hits.connect.length, 0);
   assert.equal(await modelFetch(f.url).then(r => r.text()), 'model-original-path');
 });
 
@@ -88,18 +90,16 @@ test('production resolver blocks private targets before any proxy connection', a
   } finally { await transport.close(); }
 });
 
-test('a matched rule with no upstream proxy reports the setup mistake, not a generic failure', async t => {
+test('a matched rule with no upstream proxy goes direct instead of failing', async t => {
   const f = await fixture(t);
-  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: '', resolve: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: '', resolve: async () => [{ address: '127.0.0.1', family: 4 }] });
   t.after(() => transport.close());
-  await assert.rejects(
-    new RuleFetchProvider(transport).fetch({ url: f.url }),
-    error => error.code === 'WEB_PROXY_NOT_CONFIGURED' && error.message.includes('no upstream proxy is configured'),
-  );
-  assert.equal(f.hits.connect.length, 0, 'no connection is attempted when there is nothing to connect to');
+  const tool = await new RuleFetchProvider(transport).fetch({ url: f.url });
+  assert.equal(tool.body.content, 'model-original-path');
+  assert.equal(f.hits.connect.length, 0, 'no proxy connection when there is no upstream');
 });
 
-test('an unreachable upstream proxy names the cause so the fix is obvious', async t => {
+test('unreachable upstream falls back to direct; the final error names the direct cause', async t => {
   // Take a real port and release it, so the refusal is a connection refusal
   // rather than undici rejecting a well-known "bad port" outright.
   const closed = http.createServer();
@@ -107,11 +107,11 @@ test('an unreachable upstream proxy names the cause so the fix is obvious', asyn
   await once(closed, 'listening');
   const deadPort = closed.address().port;
   await new Promise(resolve => { closed.close(resolve); closed.closeAllConnections(); });
-  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: `http://127.0.0.1:${deadPort}`, resolve: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: `http://127.0.0.1:${deadPort}`, resolve: async () => [{ address: '127.0.0.1', family: 4 }] });
   t.after(() => transport.close());
   try {
     await assert.rejects(
-      new RuleFetchProvider(transport, { timeoutMs: 5000 }).fetch({ url: 'http://127.0.0.1/' }),
+      new RuleFetchProvider(transport, { timeoutMs: 5000 }).fetch({ url: `http://127.0.0.1:${deadPort}/` }),
       error => error.code === 'WEB_PROVIDER_ERROR' && error.message.includes('ECONNREFUSED'),
     );
   } finally { await transport.close(); }

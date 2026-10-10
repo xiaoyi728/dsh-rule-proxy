@@ -5,7 +5,7 @@
 区别于“全局代理接管”类插件（dsh-plugin-proxy / dsh-proxy-pro）的核心差异：
 
 - **按规则分流，而非全局接管**：`registerFetchProvider` 自持独立传输（每请求新建 Agent/ProxyAgent、公网 IP/DNS 钉选、NAT64 检查），不修改模型 provider、全局 fetch、全局 Undici dispatcher 或父进程代理环境；模型请求与第三方子进程保持原网络路径。
-- **上游失败不回退直连**：命中规则但上游不可用时请求直接失败——“已匹配”不等于“可连通”，宁可报错也不泄漏直连。
+- **上游不可用自动回退直连**：命中规则优先走上游；上游未配置或连接失败时自动改走直连、不向工具报错，只有直连也失败才返回工具错误。
 - **域名精确匹配优先**：`domain` 类型按精确域名及子域匹配（`github.com` 匹配 `api.github.com`，不匹配 `notgithub.com`），`regex` 类型用 RE2-WASM 线性时间匹配 hostname，拒绝正则通配误匹配。
 - **规则引擎内存安全**：re2-wasm 编译实例无法释放（固定 16 MiB 堆），pattern 编译一次终身复用、配置快照按值比较，杜绝 OOM（见 [`docs/LESSONS.md`](docs/LESSONS.md) §1–2）。
 - **对话头部一键开关**：每会话头部胶囊按钮（绿 = ON / 红 = OFF），一点切换工具代理；与设置页共享同一状态 store，两处显示永远一致。
@@ -76,7 +76,7 @@ npm install /path/to/dsh-rule-proxy-0.1.0.tgz
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `true` | 总开关；`false` = 规则仍匹配但改为独立直连 |
-| `proxyUrl` | `''` | 上游 HTTP(S) 代理 origin；命中规则但为空时请求失败 |
+| `proxyUrl` | `''` | 上游 HTTP(S) 代理 origin；为空或连接失败时自动直连 |
 | `proxyToken` | `''` | 只写 secret：完整 `Proxy-Authorization` 值 |
 | `rules` | 随包 `rules.json` | 分流规则数组（见下） |
 | `searxEndpoint` | `''` | 可选 SearXNG 纯搜索端点 |
@@ -126,7 +126,7 @@ npm install /path/to/dsh-rule-proxy-0.1.0.tgz
 
 - 不修改模型 provider、全局 fetch、全局 Undici dispatcher 或父进程代理环境。
 - 命中规则走独立 HTTP(S) CONNECT 上游；未命中或 `enabled=false` 使用独立直连传输。
-- 上游失败不回退直连：未配置上游时命中请求失败，不能把“已匹配”误认为“可连通”。
+- 上游不可用自动回退直连：命中规则优先走上游；上游未配置或连接失败时自动改走直连，只有直连也失败才返回工具错误（用户策略：有上游用上游，没上游直连，不报错）。
 - 规则只匹配规范化 hostname：`.*github.*` 会匹配 `notgithub.example.com`，不是严格域名白名单，如需精确请使用 `domain` 类型。
 - 当前 DeepSeek 搜索后端含推理请求，保持原路径；`rule-proxy-searxng` 只按该服务 hostname 分流。
 - 纯 volatile 配置提交时新操作采用新快照，旧传输在其操作结束后释放；宿主 reconcile 可能重启插件效果，不能保证更新时在途请求继续。

@@ -52,47 +52,60 @@ export class ToolTransport {
     if (this.#closed) throw new WebError('Tool transport disposed', 'WEB_PROVIDER_ERROR');
     const route = this.explain(url, source);
     if (route.route === 'unmanaged') throw new Error('Unmanaged request must use its original client');
-    // A matched rule with no upstream proxy configured is a setup mistake, not a
-    // network fault: say so plainly instead of letting it surface as a generic
-    // provider failure after a pointless direct attempt.
-    if (route.route === 'proxy' && !this.proxyUrl) {
-      throw new WebError(`Rule "${route.title}" matched ${url.hostname}, but no upstream proxy is configured`, 'WEB_PROXY_NOT_CONFIGURED');
-    }
+    // Matched rule without an upstream, or upstream unusable: go direct instead
+    // of erroring (user policy: use upstream when available, direct otherwise).
+    const useProxy = route.route === 'proxy' && Boolean(this.proxyUrl);
     const addresses = await this.resolve(url.hostname, signal);
     signal.throwIfAborted();
     if (this.#closed) throw new WebError('Tool transport disposed', 'WEB_PROVIDER_ERROR');
-    let dispatcher;
-    if (route.route === 'proxy') {
-      const options = proxyOptions(this.proxyUrl, this.proxyToken);
-      const port = url.port || (url.protocol === 'https:' ? '443' : '80');
-      // Rewrite only CONNECT authority, not HTTP Host or TLS SNI/certificate identity.
-      dispatcher = new ProxyAgent({
-        ...options,
-        connectTimeout: 10000,
-        clientFactory(origin, options) {
-          const client = new Client(origin, options);
-          const connect = client.connect.bind(client);
-          client.connect = params => connect({ ...params, path: authority(addresses[0].address, port) });
-          return client;
-        },
-      });
-    } else {
-      dispatcher = new Agent({ autoSelectFamily: true, connect: { lookup: createPinnedLookup(addresses), timeout: 10000 } });
-    }
-    this.#active.add(dispatcher);
-    const close = async () => {
-      this.#active.delete(dispatcher);
-      await dispatcher.destroy();
+    const attempt = async viaProxy => {
+      let dispatcher;
+      if (viaProxy) {
+        const options = proxyOptions(this.proxyUrl, this.proxyToken);
+        const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+        // Rewrite only CONNECT authority, not HTTP Host or TLS SNI/certificate identity.
+        dispatcher = new ProxyAgent({
+          ...options,
+          connectTimeout: 10000,
+          clientFactory(origin, options) {
+            const client = new Client(origin, options);
+            const connect = client.connect.bind(client);
+            client.connect = params => connect({ ...params, path: authority(addresses[0].address, port) });
+            return client;
+          },
+        });
+      } else {
+        dispatcher = new Agent({ autoSelectFamily: true, connect: { lookup: createPinnedLookup(addresses), timeout: 10000 } });
+      }
+      this.#active.add(dispatcher);
+      const close = async () => {
+        this.#active.delete(dispatcher);
+        await dispatcher.destroy();
+      };
+      try {
+        const response = await fetch(url, { method, headers, body, signal, redirect: 'manual', dispatcher });
+        return { response, close };
+      } catch (error) {
+        await close();
+        throw error;
+      }
     };
+    if (useProxy) {
+      try {
+        return await attempt(true);
+      } catch (error) {
+        signal.throwIfAborted();
+        if (this.#closed) throw new WebError('Tool transport disposed', 'WEB_PROVIDER_ERROR');
+        // Upstream failed (unreachable, refused, …): fall through to direct.
+      }
+    }
     try {
-      const response = await fetch(url, { method, headers, body, signal, redirect: 'manual', dispatcher });
-      return { response, close };
+      return await attempt(false);
     } catch (error) {
-      await close();
       signal.throwIfAborted();
-      // Keep the underlying cause: "proxy refused" and "origin reset" need
+      // Keep the underlying cause: "origin refused" and "origin reset" need
       // different fixes, and a bare provider error hides that difference.
-      throw new WebError(`Tool ${route.route} request to ${url.hostname} failed (${failureCause(error)}); no direct fallback`, 'WEB_PROVIDER_ERROR');
+      throw new WebError(`Tool ${route.route} request to ${url.hostname} failed (${failureCause(error)})`, 'WEB_PROVIDER_ERROR');
     }
   }
   async close() {
