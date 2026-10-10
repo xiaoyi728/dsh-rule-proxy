@@ -1,5 +1,6 @@
 import { HttpFetchProvider } from '@deepseek-ai/dsh-web-fetch-http';
 import { WebError } from '@deepseek-ai/dsh-web';
+import { failureCause } from './transport.js';
 
 export const DEFAULT_LIMITS = Object.freeze({
   maxResponseBytes: 5000000,
@@ -35,7 +36,8 @@ export class RuleFetchProvider extends HttpFetchProvider {
     } catch (error) {
       if (error instanceof WebError) throw error;
       if (signal.aborted) throw new WebError('Tool request aborted', 'WEB_ABORTED');
-      throw new WebError('Tool request failed', 'WEB_PROVIDER_ERROR');
+      const cause = failureCause(error);
+      throw new WebError(`Tool request failed (${cause})`, 'WEB_PROVIDER_ERROR');
     }
   }
 }

@@ -88,6 +88,35 @@ test('production resolver blocks private targets before any proxy connection', a
   } finally { await transport.close(); }
 });
 
+test('a matched rule with no upstream proxy reports the setup mistake, not a generic failure', async t => {
+  const f = await fixture(t);
+  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: '', resolve: async () => [{ address: '93.184.216.34', family: 4 }] });
+  t.after(() => transport.close());
+  await assert.rejects(
+    new RuleFetchProvider(transport).fetch({ url: f.url }),
+    error => error.code === 'WEB_PROXY_NOT_CONFIGURED' && error.message.includes('no upstream proxy is configured'),
+  );
+  assert.equal(f.hits.connect.length, 0, 'no connection is attempted when there is nothing to connect to');
+});
+
+test('an unreachable upstream proxy names the cause so the fix is obvious', async t => {
+  // Take a real port and release it, so the refusal is a connection refusal
+  // rather than undici rejecting a well-known "bad port" outright.
+  const closed = http.createServer();
+  closed.listen(0, '127.0.0.1');
+  await once(closed, 'listening');
+  const deadPort = closed.address().port;
+  await new Promise(resolve => { closed.close(resolve); closed.closeAllConnections(); });
+  const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: `http://127.0.0.1:${deadPort}`, resolve: async () => [{ address: '93.184.216.34', family: 4 }] });
+  t.after(() => transport.close());
+  try {
+    await assert.rejects(
+      new RuleFetchProvider(transport, { timeoutMs: 5000 }).fetch({ url: 'http://127.0.0.1/' }),
+      error => error.code === 'WEB_PROVIDER_ERROR' && error.message.includes('ECONNREFUSED'),
+    );
+  } finally { await transport.close(); }
+});
+
 test('same-origin redirects, cross-origin refusal, limits, cancellation and cleanup', async t => {
   const f = await fixture(t);
   const transport = new ToolTransport({ engine: new RuleEngine([rule]), proxyUrl: `http://127.0.0.1:${f.proxy.address().port}`, resolve: async () => [{ address: '93.184.216.34', family: 4 }] });

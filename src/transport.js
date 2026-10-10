@@ -16,6 +16,24 @@ function authority(address, port) {
   return `${address.includes(':') ? `[${address}]` : address}:${port}`;
 }
 
+/**
+ * Name the underlying failure. Undici wraps connection faults as
+ * `TypeError: fetch failed` with the real code on `cause`, sometimes one or two
+ * levels down, so a bare `cause.code` lookup loses it and the operator is left
+ * with "fetch failed".
+ */
+export function failureCause(error) {
+  for (let current = error, depth = 0; current && depth < 4; current = current.cause, depth++) {
+    const code = current.code;
+    if (typeof code === 'string' && code !== 'ERR_UNHANDLED_ERROR') return code;
+    const message = current.message;
+    if (depth > 0 && typeof message === 'string' && message !== 'fetch failed') return message;
+  }
+  const codes = error?.cause?.errors?.map(entry => entry?.code).filter(Boolean);
+  if (codes?.length) return codes.join(', ');
+  return error?.message ?? 'unknown error';
+}
+
 export class ToolTransport {
   #active = new Set();
   #closed = false;
@@ -34,6 +52,12 @@ export class ToolTransport {
     if (this.#closed) throw new WebError('Tool transport disposed', 'WEB_PROVIDER_ERROR');
     const route = this.explain(url, source);
     if (route.route === 'unmanaged') throw new Error('Unmanaged request must use its original client');
+    // A matched rule with no upstream proxy configured is a setup mistake, not a
+    // network fault: say so plainly instead of letting it surface as a generic
+    // provider failure after a pointless direct attempt.
+    if (route.route === 'proxy' && !this.proxyUrl) {
+      throw new WebError(`Rule "${route.title}" matched ${url.hostname}, but no upstream proxy is configured`, 'WEB_PROXY_NOT_CONFIGURED');
+    }
     const addresses = await this.resolve(url.hostname, signal);
     signal.throwIfAborted();
     if (this.#closed) throw new WebError('Tool transport disposed', 'WEB_PROVIDER_ERROR');
@@ -63,10 +87,12 @@ export class ToolTransport {
     try {
       const response = await fetch(url, { method, headers, body, signal, redirect: 'manual', dispatcher });
       return { response, close };
-    } catch {
+    } catch (error) {
       await close();
       signal.throwIfAborted();
-      throw new WebError(`Tool ${route.route} request failed; no direct fallback`, 'WEB_PROVIDER_ERROR');
+      // Keep the underlying cause: "proxy refused" and "origin reset" need
+      // different fixes, and a bare provider error hides that difference.
+      throw new WebError(`Tool ${route.route} request to ${url.hostname} failed (${failureCause(error)}); no direct fallback`, 'WEB_PROVIDER_ERROR');
     }
   }
   async close() {
