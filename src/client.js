@@ -229,8 +229,40 @@ window.__ModuleLoader__.load({
         snapshot.error && h('p', { role: 'alert', style: { margin: 0 } }, snapshot.error));
     }
 
+    // Conversation header capsule: status dot plus one-click enable toggle,
+    // borrowed from dsh-proxy-pro's header button design. It shares the exact
+    // same store as the settings panel, so both surfaces always agree.
+    function HeaderToggle({ shared }) {
+      const snapshot = useConfig(shared);
+      const [busy, setBusy] = useState(false);
+      const value = snapshot.value ?? {};
+      const on = value.enabled === true;
+      const rules = Array.isArray(value.rules) ? value.rules : [];
+      const active = rules.filter(rule => rule && rule.active).length;
+      const ready = snapshot.status === 'ready';
+      const toggle = () => {
+        if (busy || !ready || !snapshot.writable) return;
+        setBusy(true);
+        shared.set({ enabled: !on }).finally(() => setBusy(false));
+      };
+      return h('button', {
+        type: 'button',
+        onClick: toggle,
+        disabled: busy || !ready || !snapshot.writable,
+        'aria-pressed': String(on),
+        title: `工具规则代理：${on ? '已开启' : '已关闭'} · 活动规则 ${active}/${rules.length} 条 · 上游 ${value.proxyUrl || '未配置'}（点击切换）`,
+        style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, lineHeight: 1.4, padding: '3px 10px', borderRadius: 999, border: '1px solid currentColor', background: 'transparent', color: 'inherit', cursor: busy ? 'wait' : 'pointer', opacity: 0.85 },
+      },
+        h('span', { style: { width: 8, height: 8, borderRadius: 999, background: ready ? (on ? 'var(--dsw-alias-state-success-primary, #10b981)' : 'var(--dsw-alias-state-error-primary, #ef4444)') : 'currentColor' } }),
+        h('span', null, '代理'),
+        h('span', { style: { opacity: 0.75 } }, busy ? '…' : ready ? (on ? 'ON' : 'OFF') : '?'));
+    }
+
     function apply(ctx) {
       const shared = proxyStore();
+      ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+        name: 'conversation.session.header.utilities', id: 'dsh-rule-proxy', order: 10,
+      }, function HeaderUtilities() { return h(HeaderToggle, { shared }); }));
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section', id: 'dsh-rule-proxy', order: 30, label: '工具规则代理',
       }, function Section() { return h(RulesPanel, { shared }); }));

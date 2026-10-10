@@ -33,8 +33,13 @@ try {
       window.__ModuleLoader__ = { load: definition => {
         const module = definition.factory(() => window.fixtureReact);
         module.apply({
-          slots: { inject: (_name, fn) => fn(), register: (_options, Section) => {
-            window.fixtureRoot(document.getElementById('root')).render(window.fixtureReact.createElement(Section));
+          // Each registration renders into its own container: the client now
+          // registers two slots (header capsule + settings section), and two
+          // createRoot renders into one node would replace each other.
+          slots: { inject: (_name, fn) => fn(), register: (_options, Component) => {
+            const host = document.createElement('div');
+            document.getElementById('root').appendChild(host);
+            window.fixtureRoot(host).render(window.fixtureReact.createElement(Component));
             return () => {};
           } },
         });
@@ -42,6 +47,13 @@ try {
     });
     await page.addScriptTag({ content: client });
     await page.locator('#rule-proxy-enabled').waitFor({ state: 'attached' });
+    // Header capsule shares the same store and toggles through the same endpoint.
+    const headerToggle = page.locator('button[aria-pressed]');
+    await headerToggle.waitFor({ state: 'attached' });
+    await headerToggle.click();
+    await page.waitForFunction(() => document.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed') === 'false');
+    await headerToggle.click();
+    await page.waitForFunction(() => document.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed') === 'true');
     await page.locator('#rule-proxy-url').fill('http://127.0.0.1:7890');
         await page.getByRole('button', { name: '诊断' }).click();
     await page.waitForFunction(() => document.querySelector('output')?.textContent.includes('代理'));

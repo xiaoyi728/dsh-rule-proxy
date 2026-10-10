@@ -18,7 +18,8 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-plugin-manager"
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-conversation"
       ],
       "platform": "web"
     }
@@ -27,6 +28,7 @@
     "src",
     "cordis.patch.yml",
     "rules.json",
+    "docs",
     "README.md",
     "TEST_REPORT.md",
     "THIRD_PARTY_NOTICES.md"

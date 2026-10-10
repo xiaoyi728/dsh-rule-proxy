@@ -34,16 +34,19 @@ function load() {
   };
 }
 
-test('client registers under the package name and requires only slots', () => {
+test('client registers the header capsule and the settings section and requires only slots', () => {
   const fixture = load();
   assert.deepEqual([...fixture.module.inject], ['slots']);
   fixture.register({
-    slots: { inject: (name, fn) => { assert.equal(name, 'settings.section'); return fn(); }, register: options => { fixture.registrations.push(options); return () => {}; } },
+    slots: { inject: (name, fn) => {
+      assert.ok(['conversation.session.header.utilities', 'settings.section'].includes(name));
+      return fn();
+    }, register: options => { fixture.registrations.push(options); return () => {}; } },
   });
-  assert.equal(fixture.registrations.length, 1);
-  assert.equal(fixture.registrations[0].name, 'settings.section');
-  assert.equal(fixture.registrations[0].id, 'dsh-rule-proxy');
-  assert.equal(typeof fixture.registrations[0].label, 'string');
+  assert.equal(fixture.registrations.length, 2);
+  assert.deepEqual(fixture.registrations.map(entry => entry.name), ['conversation.session.header.utilities', 'settings.section']);
+  assert.ok(fixture.registrations.every(entry => entry.id === 'dsh-rule-proxy'));
+  assert.equal(typeof fixture.registrations[1].label, 'string');
 });
 
 test('client reads configuration from the host endpoint and never handles the secret', () => {
