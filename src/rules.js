@@ -3,6 +3,25 @@ import { RE2 } from 're2-wasm';
 export const MAX_RULES = 256;
 export const MAX_PATTERN_LENGTH = 512;
 
+// re2-wasm stores every compiled pattern in a fixed 16 MiB WASM heap and
+// exposes no way to free an instance (no delete()/dispose()), so recompiling
+// the same patterns — which happens on every settings read and every transport
+// rebuild — exhausts the heap and aborts every later RE2 operation with
+// "Cannot enlarge memory arrays to size 16781312 bytes (OOM)". Share one
+// instance per pattern for the process lifetime so repeated compiles allocate
+// nothing; the cache stays tiny because patterns are bounded and few.
+const compiledCache = new Map();
+
+function compilePattern(pattern, index) {
+  let compiled = compiledCache.get(pattern);
+  if (!compiled) {
+    try { compiled = new RE2(pattern, 'u'); }
+    catch (error) { throw new Error(`Rule ${index}: invalid or unsupported RE2 expression (${error?.message ?? error})`); }
+    compiledCache.set(pattern, compiled);
+  }
+  return compiled;
+}
+
 export function normalizeHostname(input) {
   const url = new URL(input);
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only HTTP(S) URLs are supported');
@@ -13,6 +32,7 @@ export function normalizeHostname(input) {
 export class RuleEngine {
   #rules;
   #compiled;
+  #public;
   constructor(input) { this.replace(input); }
   replace(input) {
     if (typeof input === 'string') {
@@ -31,13 +51,15 @@ export class RuleEngine {
     });
     const compiled = rules.map((rule, index) => {
       if (rule.type === 'domain') return rule.pattern.toLowerCase();
-      try { return new RE2(rule.pattern, 'u'); }
-      catch { throw new Error(`Rule ${index}: invalid or unsupported RE2 expression`); }
+      return compilePattern(rule.pattern, index);
     });
     this.#rules = Object.freeze(rules);
     this.#compiled = compiled;
+    // One stable frozen snapshot per engine: callers treat the result as
+    // read-only, and identity stability lets config snapshots compare cheaply.
+    this.#public = Object.freeze(rules.map(rule => Object.freeze({ ...rule })));
   }
-  get rules() { return this.#rules.map(rule => ({ ...rule })); }
+  get rules() { return this.#public; }
   explain(input, { enabled = true, source = 'web-fetch' } = {}) {
     if (!['web-fetch', 'pure-search', 'github-api', 'github-git'].includes(source)) {
       return { source, route: 'unmanaged', reason: 'Model and unrelated requests retain their existing network path' };

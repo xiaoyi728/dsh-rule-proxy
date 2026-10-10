@@ -36,6 +36,16 @@ export const Config = z.object(Object.fromEntries(
   Object.entries(InputConfig.dict).map(([key, schema]) => [key, schema.volatile()]),
 ));
 
+// Settings reads re-parse values, so rules come back as a fresh array each
+// time even when unchanged. Compare snapshots by value: reference comparison
+// would rebuild the engine and transport on every request.
+function sameSnapshot(a, b) {
+  return Boolean(a) && Object.keys(a).length === Object.keys(b).length
+    && Object.keys(a).every(key => (Array.isArray(a[key]) && Array.isArray(b[key]))
+      ? JSON.stringify(a[key]) === JSON.stringify(b[key])
+      : a[key] === b[key]);
+}
+
 export function create(input = {}) {
   const config = InputConfig(structuredClone(input));
   const engine = new RuleEngine(config.rules);
@@ -50,7 +60,7 @@ export function apply(ctx, config) {
   let latest;
   const settings = { get() {
     const next = Object.fromEntries(Object.entries(config).map(([key, ref]) => [key, ref.get()]));
-    if (!latest || Object.keys(next).some(key => next[key] !== latest[key])) latest = next;
+    if (!sameSnapshot(latest, next)) latest = next;
     return latest;
   } };
   const records = new Set();
