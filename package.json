@@ -1,6 +1,6 @@
 {
   "name": "dsh-rule-proxy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Isolated hostname-rule transport for DSH web tools",
   "type": "module",
   "main": "src/index.js",
@@ -53,7 +53,8 @@
     "diagnose": "node src/cli.js"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
   },
   "license": "MIT",
   "dependencies": {
@@ -66,8 +67,8 @@
     "undici": "^8.10.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4",
-    "@deepseek-ai/dsh-web": "0.2.0-rc.2"
+    "@deepseek-ai/cordis": ">=4.0.4 <5",
+    "@deepseek-ai/dsh-web": ">=0.2.0-rc.2 <0.3.0"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-settings": "0.2.0-rc.2",
