@@ -7,7 +7,7 @@ export const DEFAULT_LIMITS = Object.freeze({
   maxBodyChars: 100000,
   timeoutMs: 30000,
   maxRedirects: 5,
-  userAgent: 'dsh-rule-proxy/0.1.0',
+  userAgent: 'dsh-rule-proxy/0.1.1',
 });
 
 export function limitsFor(input = {}) {

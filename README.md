@@ -19,16 +19,24 @@
 **方式 A：DSH 插件命令（推荐）**
 
 ```sh
+dsh plugin --profile web add dsh-rule-proxy
+```
+
+在 GUI 里也可以 **插件 → 添加插件** 直接输入包名 `dsh-rule-proxy`。
+
+**方式 B：从 GitHub 源码安装**
+
+```sh
 dsh plugin --profile web add github:xiaoyi728/dsh-rule-proxy
 ```
 
-**方式 B：本地打包安装（开发 / 离线）**
+本插件没有 `prepare` / `build` 脚本，`files` 直接指向 `src`，因此源码安装不会触发 pnpm 的 `allowBuilds` 构建授权。
 
-```sh
-npm install /path/to/dsh-rule-proxy-0.1.0.tgz
-```
+**方式 C：本地目录（开发自测）**
 
-安装前请确认终端工作目录是目标 profile 而非当前 GUI 的 profile（`npm install` 会修改当前目录的依赖）。DSH 原生 profile 使用 `cordis.patch.yml`，不应把普通条目列表误当成 patch；将以下 patch **合并**进 profile 现有 patch 数组（不要覆盖其他条目）：
+在 **插件 → 添加插件** 中输入本仓库的绝对路径，例如 `/path/to/dsh-rule-proxy`。
+
+无论哪种方式，装完后都需要把 web 服务的 `fetchProvider` 指向 `rule-proxy`：DSH 原生 profile 使用 `cordis.patch.yml`，不应把普通条目列表误当成 patch；将以下 patch **合并**进 profile 现有 patch 数组（不要覆盖其他条目）：
 
 ```yaml
 - insert:
@@ -44,6 +52,10 @@ npm install /path/to/dsh-rule-proxy-0.1.0.tgz
 ```
 
 其中 `web` 必须换成该 profile 实际 WebRuntime 的 entry id；独立配置覆盖行用于让原生 ConfigEditor 正确读写用户层。profile 需已有 web 服务，使用标准工具还需启用原生 tool-web，设置页需已有原生设置和插件管理客户端服务。若使用自建 Cordis 基准文件而不是 DSH profile patch，才使用普通插件条目结构。安装完成后启动 `dsh web`。
+
+### 它会接管什么、数据去哪
+
+只接管**命中规则的网页工具请求**（web_fetch / GitHub 工具 / 可选的 SearXNG 纯搜索）：这些请求通过你在设置里填的上游代理发出；未命中规则、或上游不可用时的回退请求，走本插件自持的直连传输。模型请求、全局 fetch、全局 Undici dispatcher 和父进程代理环境都不被修改。插件不发送任何遥测；规则、代理地址和 `proxyToken` 只存在于你的 profile 配置文件中，`proxyToken` 永不通过接口回传。
 
 ## 使用
 
