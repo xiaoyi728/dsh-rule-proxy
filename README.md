@@ -16,25 +16,34 @@
 
 ## 安装
 
-**方式 A：DSH 插件命令（推荐）**
-
-```sh
-dsh plugin --profile web add dsh-rule-proxy
-```
-
-在 GUI 里也可以 **插件 → 添加插件** 直接输入包名 `dsh-rule-proxy`。
-
-**方式 B：从 GitHub 源码安装**
+**方式 A：GitHub 仓库地址（推荐）**
 
 ```sh
 dsh plugin --profile web add github:xiaoyi728/dsh-rule-proxy
 ```
 
+在 GUI 里也可以 **插件 → 添加插件** 直接粘贴仓库地址：
+
+```
+https://github.com/xiaoyi728/dsh-rule-proxy
+```
+
+下面这些写法等价，都会被官方安装弹窗识别为 git 源：
+
+```
+github:xiaoyi728/dsh-rule-proxy
+https://github.com/xiaoyi728/dsh-rule-proxy
+https://github.com/xiaoyi728/dsh-rule-proxy.git
+git+https://github.com/xiaoyi728/dsh-rule-proxy.git
+```
+
 本插件没有 `prepare` / `build` 脚本，`files` 直接指向 `src`，因此源码安装不会触发 pnpm 的 `allowBuilds` 构建授权。
 
-**方式 C：本地目录（开发自测）**
+**方式 B：本地目录（开发自测）**
 
 在 **插件 → 添加插件** 中输入本仓库的绝对路径，例如 `/path/to/dsh-rule-proxy`。
+
+> 本插件未发布到 npm，`add dsh-rule-proxy` 这种方式目前不可用。
 
 无论哪种方式，装完后都需要把 web 服务的 `fetchProvider` 指向 `rule-proxy`：DSH 原生 profile 使用 `cordis.patch.yml`，不应把普通条目列表误当成 patch；将以下 patch **合并**进 profile 现有 patch 数组（不要覆盖其他条目）：
 
@@ -151,22 +160,11 @@ npm test                # node --test，40 条单测
 npm run check           # 语法检查
 npm run test:browser    # Playwright 桌面/移动夹具（需 npx playwright install chromium）
 npm run test:package    # 临时目录安装 tarball，验证生产依赖与 Cordis 注册/卸载
-npm run test:index      # 用官方 parseMarketIndex 校验索引文档形状（不联网）
 npm run diagnose -- https://github.com web-fetch rules.json
 npm run diagnose -- https://api.openai.com model rules.json
 ```
 
 `npm run test:browser` 使用本地 Playwright Chromium 测试独立 React 夹具的桌面/移动交互，不启动 DSH GUI、不安装插件到当前 profile，不能替代实际宿主页面验收。`npm run test:package` 在全新临时目录安装当前 tarball 的生产依赖并用独立 Node 进程验证后端导入、默认规则、client 文件、Cordis provider 注册/卸载和全局网络状态；需要 npm registry 网络，不会向当前 GUI/profile 安装，结束后删除临时目录。可用 `npm run test:package -- /absolute/path/package.tgz` 指定包。
-
-### 市场索引
-
-`npm run build:index` 生成 `docs/index.json`——一个 DSH 插件市场 format-1 索引，供官方「发现」标签页读取。版本号与发布时间取自 npm registry：包未发布时脚本会直接报错，不会写入一个装不上的版本。写盘前会用官方 `parseMarketIndex` 校验整份文档。
-
-发布后在 DSH 中启用实验性插件市场（插件 → 实验性插件 → 自定义插件市场），把索引地址加进索引源即可看到本插件：
-
-```
-https://raw.githubusercontent.com/xiaoyi728/dsh-rule-proxy/main/docs/index.json
-```
 
 ## 待完成和验收限制
 
