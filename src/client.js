@@ -186,7 +186,7 @@ window.__ModuleLoader__.load({
             h('input', { id: 'rule-proxy-enabled', type: 'checkbox', checked: value.enabled === true, disabled, onChange: e => commit({ enabled: e.target.checked }) }),
             h('span', null, '工具代理'),
             h('span', { style: { fontSize: 12, fontWeight: 400, opacity: 0.68 } }, '关闭后规则仍然匹配，但网页工具改为直连。')),
-          field('上游 HTTP(S) 代理', h('input', { id: 'rule-proxy-url', style: control, value: value.proxyUrl ?? '', disabled, placeholder: 'http://10.20.15.242:10880', onChange: e => commit({ proxyUrl: e.target.value }) }),
+          field('上游 HTTP(S) 代理', h('input', { id: 'rule-proxy-url', style: control, value: value.proxyUrl ?? '', disabled, placeholder: 'http://127.0.0.1:7890', onChange: e => commit({ proxyUrl: e.target.value }) }),
             '命中规则的网页工具通过此地址连接。只能填 origin，不含路径与账号密码。'),
           field('SearXNG 接口', h('input', { id: 'rule-proxy-searx', style: control, value: value.searxEndpoint ?? '', disabled, placeholder: '留空即可不启用', onChange: e => commit({ searxEndpoint: e.target.value }) }),
             '可选。仅用于纯搜索服务；该服务需开启 JSON 输出，且其 hostname 命中规则才会走代理。'),
