@@ -64,7 +64,8 @@
     "test:package": "node test/package-smoke.mjs",
     "build:index": "node scripts/build-index.mjs",
     "check:index": "node scripts/build-index.mjs --check",
-    "diagnose": "node src/cli.js"
+    "diagnose": "node src/cli.js",
+    "test:index": "node scripts/build-index.mjs --self-test"
   },
   "engines": {
     "node": ">=22.19.0",

@@ -151,11 +151,22 @@ npm test                # node --test，40 条单测
 npm run check           # 语法检查
 npm run test:browser    # Playwright 桌面/移动夹具（需 npx playwright install chromium）
 npm run test:package    # 临时目录安装 tarball，验证生产依赖与 Cordis 注册/卸载
+npm run test:index      # 用官方 parseMarketIndex 校验索引文档形状（不联网）
 npm run diagnose -- https://github.com web-fetch rules.json
 npm run diagnose -- https://api.openai.com model rules.json
 ```
 
 `npm run test:browser` 使用本地 Playwright Chromium 测试独立 React 夹具的桌面/移动交互，不启动 DSH GUI、不安装插件到当前 profile，不能替代实际宿主页面验收。`npm run test:package` 在全新临时目录安装当前 tarball 的生产依赖并用独立 Node 进程验证后端导入、默认规则、client 文件、Cordis provider 注册/卸载和全局网络状态；需要 npm registry 网络，不会向当前 GUI/profile 安装，结束后删除临时目录。可用 `npm run test:package -- /absolute/path/package.tgz` 指定包。
+
+### 市场索引
+
+`npm run build:index` 生成 `docs/index.json`——一个 DSH 插件市场 format-1 索引，供官方「发现」标签页读取。版本号与发布时间取自 npm registry：包未发布时脚本会直接报错，不会写入一个装不上的版本。写盘前会用官方 `parseMarketIndex` 校验整份文档。
+
+发布后在 DSH 中启用实验性插件市场（插件 → 实验性插件 → 自定义插件市场），把索引地址加进索引源即可看到本插件：
+
+```
+https://raw.githubusercontent.com/xiaoyi728/dsh-rule-proxy/main/docs/index.json
+```
 
 ## 待完成和验收限制
 

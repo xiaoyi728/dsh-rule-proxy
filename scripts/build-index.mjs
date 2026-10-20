@@ -22,6 +22,7 @@ const INDEX_URL = 'https://raw.githubusercontent.com/xiaoyi728/dsh-rule-proxy/ma
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 const checkOnly = process.argv.includes('--check')
+const selfTest = process.argv.includes('--self-test')
 
 /** Load the official validator; it is the only authority on what a host accepts. */
 async function loadValidator() {
@@ -87,9 +88,18 @@ function buildIndex(timestamp) {
   }
 }
 
-const { parseMarketIndex } = await loadValidator()
+const { parseMarketIndex, marketInstallTarget } = await loadValidator()
 
-if (checkOnly) {
+if (selfTest) {
+  // Validate the document shape without contacting the registry, so the format
+  // can be proven before the package is published. A stand-in timestamp is used
+  // only here and never written to disk.
+  const index = buildIndex(1_700_000_000)
+  const parsed = parseMarketIndex(index, INDEX_URL)
+  const [entry] = parsed.plugins
+  const target = marketInstallTarget(entry.name, entry.versions[0])
+  console.log(`self-test: valid format-1 index for ${entry.name}, install spec ${target.spec}`)
+} else if (checkOnly) {
   if (!fs.existsSync(OUT_FILE)) throw new Error(`${OUT_FILE} does not exist; run without --check first`)
   const parsed = parseMarketIndex(JSON.parse(fs.readFileSync(OUT_FILE, 'utf8')), INDEX_URL)
   const [entry] = parsed.plugins
